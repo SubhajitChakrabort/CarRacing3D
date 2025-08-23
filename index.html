@@ -176,6 +176,13 @@
             color: #232323;
         }
 
+        /* Circular loading progress */
+        .progress-container { position: relative; width: 120px; height: 120px; margin-bottom: 16px; }
+        .progress-svg { width: 120px; height: 120px; transform: rotate(-90deg); }
+        .progress-bg { fill: none; stroke: rgba(255,255,255,0.18); stroke-width: 12; }
+        .progress-bar { fill: none; stroke: #4CAF50; stroke-width: 12; stroke-linecap: round; transition: stroke-dashoffset 0.1s linear; }
+        .progress-percent { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 22px; font-weight: 700; color: #fff; }
+
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
     </style>
 </head>
@@ -187,8 +194,14 @@
         <source src="carsound.mp3" type="audio/mpeg">
     </audio>
     <div id="start-overlay" style="position:fixed;z-index:9999;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);color:#fff;display:flex;align-items:center;justify-content:center;font-size:2.2rem;font-family:'Montserrat',sans-serif;cursor:pointer;">Tap to Start</div>
-    <div id="loading-screen">
-        <div class="loader"></div>
+    <div id="loading-screen" style="display:none;">
+        <div class="progress-container">
+            <svg class="progress-svg" viewBox="0 0 120 120">
+                <circle class="progress-bg" cx="60" cy="60" r="54"></circle>
+                <circle id="progress-circle" class="progress-bar" cx="60" cy="60" r="54" style="stroke-dasharray: 339.292; stroke-dashoffset: 339.292;"></circle>
+            </svg>
+            <div id="progress-percent" class="progress-percent">0%</div>
+        </div>
         <div id="loading-text">Loading Game</div>
         <div id="loading-progress">0%</div>
     </div>
@@ -220,6 +233,7 @@
             overlay.style.display = 'none';
             if (carAudio) carAudio.play().catch(()=>{});
             if (carSound) carSound.play().catch(()=>{});
+            if (window.__startGame) window.__startGame();
         }
         overlay.addEventListener('click', startGame);
         overlay.addEventListener('touchstart', startGame);
@@ -270,32 +284,63 @@
         let score = 0;
         let isGameOver = false;
 
+        // Points
         const points = [];
         const numPoints = 25;
         const pointValue = 10;
         let pointGeometry, pointMaterial;
         const pointRadius = 0.3;
-        
         const numEnemyCars = 10;
 
+        // UI refs
         const loadingScreen = document.getElementById('loading-screen');
         const loadingProgress = document.getElementById('loading-progress');
         const scoreElement = document.getElementById('score');
         const gameOverElement = document.getElementById('game-over');
         const restartButton = document.getElementById('restart-button');
+        const progressCircle = document.getElementById('progress-circle');
+        const progressPercent = document.getElementById('progress-percent');
 
+        // AABBs
         let playerBox = new THREE.Box3();
         let enemyBox = new THREE.Box3();
         let pointBox = new THREE.Box3();
 
-        const loadingManager = new THREE.LoadingManager();
+        // Start gating
+        let hasStarted = false;
+        let assetsLoaded = false;
+        let animationStarted = false;
+        let initStarted = false;
+        window.__startGame = () => {
+            hasStarted = true;
+            // Kick off init after a small delay and show the loading screen
+            if (!initStarted) {
+                initStarted = true;
+                setTimeout(() => {
+                    if (loadingScreen) {
+                        loadingScreen.style.display = 'flex';
+                        loadingScreen.classList.remove('hidden');
+                        loadingScreen.style.opacity = 1;
+                    }
+                    init();
+                    setupControls();
+                }, 250);
+            }
+            // If assets already loaded very fast, start animation now
+            if (assetsLoaded && !animationStarted) { animationStarted = true; animate(); }
+        };
 
+        const loadingManager = new THREE.LoadingManager();
         loadingManager.onLoad = () => {
             console.log("All resources loaded!");
+            assetsLoaded = true;
             loadingScreen.classList.add('hidden');
             setTimeout(() => {
                 if (loadingScreen) loadingScreen.style.display = 'none';
-                if (!isGameOver) animate();
+                if (hasStarted && !animationStarted && !isGameOver) {
+                    animationStarted = true;
+                    animate();
+                }
             }, 600);
         };
         loadingManager.onError = (url) => {
@@ -307,10 +352,18 @@
         loadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
             const progress = Math.round((itemsLoaded / itemsTotal) * 100);
             loadingProgress.textContent = `${progress}%`;
+            if (progressPercent) progressPercent.textContent = `${progress}%`;
+            if (progressCircle) {
+                const radius = 54; // matches r in SVG
+                const circumference = 2 * Math.PI * radius;
+                progressCircle.style.strokeDasharray = `${circumference}`;
+                progressCircle.style.strokeDashoffset = `${circumference * (1 - progress / 100)}`;
+            }
         };
 
-        init();
-        setupControls();
+        // Do not initialize immediately; wait for user interaction
+        // init();
+        // setupControls();
 
         function init() {
             scene = new THREE.Scene();
